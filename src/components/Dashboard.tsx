@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 type Priority = "High" | "Medium" | "Low";
+type SortOption = "dueDate" | "priority" | "createdAt" | "alphabetical";
 
 type Task = {
   id: string;
@@ -11,6 +12,14 @@ type Task = {
   projectId: string;
   createdAt: string;
   updatedAt: string;
+};
+
+type StudySession = {
+  id: string;
+  taskId: string;
+  startTime: string;
+  endTime?: string;
+  duration?: number;
 };
 
 type Project = {
@@ -29,7 +38,20 @@ const priorityIndicators: Record<Priority, string> = {
   Low: "🟢",
 };
 
+const priorityOrder: Record<Priority, number> = {
+  High: 0,
+  Medium: 1,
+  Low: 2,
+};
+
 function createTaskId() {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+}
+
+function createStudySessionId() {
   return (
     globalThis.crypto?.randomUUID?.() ??
     `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -123,6 +145,94 @@ function migrateTasks(saved: string | null, projects: Project[]): Task[] {
   }
 }
 
+function loadStudySessions(saved: string | null): StudySession[] {
+  if (!saved) return [];
+
+  try {
+    const parsed: unknown = JSON.parse(saved);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .filter(
+        (session): session is Record<string, unknown> =>
+          typeof session === "object" && session !== null && !Array.isArray(session),
+      )
+      .filter(
+        (session) =>
+          typeof session.taskId === "string" &&
+          typeof session.startTime === "string" &&
+          !Number.isNaN(Date.parse(session.startTime)),
+      )
+      .map((session) => {
+        const endTime =
+          typeof session.endTime === "string" &&
+          !Number.isNaN(Date.parse(session.endTime))
+            ? session.endTime
+            : undefined;
+        const calculatedDuration = endTime
+          ? Math.max(0, Date.parse(endTime) - Date.parse(session.startTime as string))
+          : undefined;
+
+        return {
+          id:
+            typeof session.id === "string" && session.id
+              ? session.id
+              : createStudySessionId(),
+          taskId: session.taskId as string,
+          startTime: session.startTime as string,
+          endTime,
+          duration:
+            typeof session.duration === "number" && session.duration >= 0
+              ? session.duration
+              : calculatedDuration,
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function getSessionDuration(session: StudySession) {
+  if (typeof session.duration === "number") return session.duration;
+  if (!session.endTime) return 0;
+
+  return Math.max(0, Date.parse(session.endTime) - Date.parse(session.startTime));
+}
+
+function formatDuration(duration: number) {
+  const totalMinutes = Math.floor(duration / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function getTotalStudyDuration(taskId: string, sessions: StudySession[]) {
+  return sessions.reduce(
+    (total, session) =>
+      session.taskId === taskId ? total + getSessionDuration(session) : total,
+    0,
+  );
+}
+
+function getTodayStudyDuration(taskId: string, sessions: StudySession[]) {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+
+  return sessions.reduce((total, session) => {
+    if (session.taskId !== taskId || !session.endTime) return total;
+
+    const sessionStart = new Date(session.startTime).getTime();
+    const sessionEnd = new Date(session.endTime).getTime();
+    const overlapStart = Math.max(sessionStart, todayStart.getTime());
+    const overlapEnd = Math.min(sessionEnd, tomorrowStart.getTime());
+
+    return total + Math.max(0, overlapEnd - overlapStart);
+  }, 0);
+}
+
 function getLocalDateString(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -161,6 +271,9 @@ function Dashboard({ projects, selectedProjectId }: DashboardProps) {
   const [tasks, setTasks] = useState<Task[]>(() =>
     migrateTasks(localStorage.getItem("tasks"), projects),
   );
+  const [studySessions, setStudySessions] = useState<StudySession[]>(() =>
+    loadStudySessions(localStorage.getItem("studySessions")),
+  );
 
   const [input, setInput] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -168,10 +281,16 @@ function Dashboard({ projects, selectedProjectId }: DashboardProps) {
   const [projectId, setProjectId] = useState("inbox");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<SortOption>("createdAt");
 
   useEffect(() => {
     localStorage.setItem("tasks", JSON.stringify(tasks));
   }, [tasks]);
+
+  useEffect(() => {
+    localStorage.setItem("studySessions", JSON.stringify(studySessions));
+  }, [studySessions]);
 
   function addTask() {
     if (input.trim() === "") return;
@@ -227,6 +346,40 @@ function Dashboard({ projects, selectedProjectId }: DashboardProps) {
     setEditingId(null);
   }
 
+  function startStudy(taskId: string) {
+    if (studySessions.some((session) => session.taskId === taskId && !session.endTime)) {
+      return;
+    }
+
+    setStudySessions([
+      ...studySessions,
+      {
+        id: createStudySessionId(),
+        taskId,
+        startTime: new Date().toISOString(),
+      },
+    ]);
+  }
+
+  function stopStudy(taskId: string) {
+    const endTime = new Date().toISOString();
+
+    setStudySessions(
+      studySessions.map((session) =>
+        session.taskId === taskId && !session.endTime
+          ? {
+              ...session,
+              endTime,
+              duration: Math.max(
+                0,
+                Date.parse(endTime) - Date.parse(session.startTime),
+              ),
+            }
+          : session,
+      ),
+    );
+  }
+
   const completedTasks = tasks.filter((task) => task.completed).length;
   const remainingTasks = tasks.length - completedTasks;
   const highPriorityTasks = tasks.filter(
@@ -241,6 +394,34 @@ function Dashboard({ projects, selectedProjectId }: DashboardProps) {
   const filteredTasks = tasks.filter(
     (task) => task.projectId === selectedProjectId,
   );
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const searchedTasks = filteredTasks.filter((task) => {
+    const projectName =
+      projects.find((project) => project.id === task.projectId)?.name ?? "Inbox";
+
+    return (
+      task.title.toLowerCase().includes(normalizedSearchQuery) ||
+      projectName.toLowerCase().includes(normalizedSearchQuery)
+    );
+  });
+  const sortedTasks = [...searchedTasks].sort((firstTask, secondTask) => {
+    if (sortBy === "dueDate") {
+      if (!firstTask.dueDate && !secondTask.dueDate) return 0;
+      if (!firstTask.dueDate) return 1;
+      if (!secondTask.dueDate) return -1;
+      return firstTask.dueDate.localeCompare(secondTask.dueDate);
+    }
+
+    if (sortBy === "priority") {
+      return priorityOrder[firstTask.priority] - priorityOrder[secondTask.priority];
+    }
+
+    if (sortBy === "alphabetical") {
+      return firstTask.title.localeCompare(secondTask.title);
+    }
+
+    return secondTask.createdAt.localeCompare(firstTask.createdAt);
+  });
   const today = getLocalDateString(new Date());
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -355,8 +536,39 @@ function Dashboard({ projects, selectedProjectId }: DashboardProps) {
           <button onClick={addTask}>追加</button>
         </div>
 
-        <ul>
-          {filteredTasks.map((task) => (
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            marginBottom: "15px",
+          }}
+        >
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search tasks or projects"
+            aria-label="タスクを検索"
+          />
+
+          <label>
+            Sort by {" "}
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+            >
+              <option value="dueDate">Due date</option>
+              <option value="priority">Priority</option>
+              <option value="createdAt">Created date</option>
+              <option value="alphabetical">Alphabetical</option>
+            </select>
+          </label>
+        </div>
+
+        {sortedTasks.length === 0 ? (
+          <p>No matching tasks.</p>
+        ) : (
+          <ul>
+            {sortedTasks.map((task) => (
             <li
               key={task.id}
               style={{
@@ -396,9 +608,15 @@ function Dashboard({ projects, selectedProjectId }: DashboardProps) {
                   {projects.find((project) => project.id === task.projectId)
                     ?.name ?? "Inbox"}
                 </div>
+                <div style={{ fontSize: "14px", marginTop: "4px" }}>
+                  Today's study time: {formatDuration(getTodayStudyDuration(task.id, studySessions))}
+                </div>
+                <div style={{ fontSize: "14px", marginTop: "4px" }}>
+                  Total study time: {formatDuration(getTotalStudyDuration(task.id, studySessions))}
+                </div>
               </div>
 
-              <div style={{ display: "flex", gap: "10px" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", justifyContent: "flex-end" }}>
                 {editingId === task.id ? (
                   <button onClick={() => saveTask(task.id)}>保存</button>
                 ) : (
@@ -410,10 +628,27 @@ function Dashboard({ projects, selectedProjectId }: DashboardProps) {
                 <button onClick={() => deleteTask(task.id)} aria-label="削除">
                   🗑️
                 </button>
+                <button
+                  onClick={() => startStudy(task.id)}
+                  disabled={studySessions.some(
+                    (session) => session.taskId === task.id && !session.endTime,
+                  )}
+                >
+                  Start Study
+                </button>
+                <button
+                  onClick={() => stopStudy(task.id)}
+                  disabled={!studySessions.some(
+                    (session) => session.taskId === task.id && !session.endTime,
+                  )}
+                >
+                  Stop Study
+                </button>
               </div>
             </li>
-          ))}
-        </ul>
+            ))}
+          </ul>
+        )}
       </div>
     </>
   );

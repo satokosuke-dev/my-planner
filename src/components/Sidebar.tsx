@@ -10,6 +10,8 @@ type SidebarProps = {
   selectedProjectId: string;
   onSelectProject: (id: string) => void;
   onAddProject: (name: string) => void;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
 };
 
 function Sidebar({
@@ -17,6 +19,8 @@ function Sidebar({
   selectedProjectId,
   onSelectProject,
   onAddProject,
+  theme,
+  onToggleTheme,
 }: SidebarProps) {
   const [newProjectName, setNewProjectName] = useState("");
 
@@ -39,6 +43,14 @@ function Sidebar({
         <p>📊 Statistics</p>
         <p>⚙️ Settings</p>
       </nav>
+
+      <button
+        className="theme-toggle"
+        onClick={onToggleTheme}
+        aria-pressed={theme === "dark"}
+      >
+        {theme === "dark" ? "☀️ Light mode" : "🌙 Dark mode"}
+      </button>
 
       <h2 style={{ marginTop: "30px", marginBottom: "10px" }}>Projects</h2>
       <div>

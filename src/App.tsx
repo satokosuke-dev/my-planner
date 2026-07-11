@@ -8,7 +8,13 @@ type Project = {
   name: string;
 };
 
+type Theme = "light" | "dark";
+
 const inboxProject: Project = { id: "inbox", name: "Inbox" };
+
+function loadTheme(): Theme {
+  return localStorage.getItem("theme") === "dark" ? "dark" : "light";
+}
 
 function createProjectId() {
   return (
@@ -46,10 +52,16 @@ function loadProjects(): Project[] {
 function App() {
   const [projects, setProjects] = useState<Project[]>(loadProjects);
   const [selectedProjectId, setSelectedProjectId] = useState("inbox");
+  const [theme, setTheme] = useState<Theme>(loadTheme);
 
   useEffect(() => {
     localStorage.setItem("projects", JSON.stringify(projects));
   }, [projects]);
+
+  useEffect(() => {
+    localStorage.setItem("theme", theme);
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   function addProject(name: string) {
     const trimmedName = name.trim();
@@ -69,12 +81,18 @@ function App() {
   }
 
   return (
-    <div className="app">
+    <div className="app" data-theme={theme}>
       <Sidebar
         projects={projects}
         selectedProjectId={selectedProjectId}
         onSelectProject={setSelectedProjectId}
         onAddProject={addProject}
+        theme={theme}
+        onToggleTheme={() =>
+          setTheme((currentTheme) =>
+            currentTheme === "light" ? "dark" : "light",
+          )
+        }
       />
 
       <main className="content">
