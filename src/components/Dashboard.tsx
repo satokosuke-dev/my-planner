@@ -7,23 +7,27 @@ type Task = {
 
 function Dashboard() {
   const [tasks, setTasks] = useState<Task[]>(() => {
-  const saved = localStorage.getItem("tasks");
+    const saved = localStorage.getItem("tasks");
 
-  if (saved) {
-    return JSON.parse(saved);
-  }
+    if (saved) {
+      return JSON.parse(saved);
+    }
 
-  return [
-    { text: "英検1級", completed: false },
-    { text: "数学", completed: false },
-    { text: "ジム", completed: false },
-  ];
-});
+    return [
+      { text: "英検1級", completed: false },
+      { text: "数学", completed: false },
+      { text: "ジム", completed: false },
+    ];
+  });
 
   const [input, setInput] = useState("");
-useEffect(() => {
-  localStorage.setItem("tasks", JSON.stringify(tasks));
-}, [tasks]);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState("");
+
+  useEffect(() => {
+    localStorage.setItem("tasks", JSON.stringify(tasks));
+  }, [tasks]);
+
   function addTask() {
     if (input.trim() === "") return;
 
@@ -40,16 +44,31 @@ useEffect(() => {
 
   function deleteTask(index: number) {
     setTasks(tasks.filter((_, i) => i !== index));
+    setEditingIndex(null);
   }
+
   function toggleTask(index: number) {
-  setTasks(
-    tasks.map((task, i) =>
-      i === index
-        ? { ...task, completed: !task.completed }
-        : task
-    )
-  );
-}
+    setTasks(
+      tasks.map((task, i) =>
+        i === index ? { ...task, completed: !task.completed } : task,
+      ),
+    );
+  }
+
+  function startEditing(index: number) {
+    setEditingIndex(index);
+    setEditingText(tasks[index].text);
+  }
+
+  function saveTask(index: number) {
+    const text = editingText.trim();
+    if (text === "") return;
+
+    setTasks(
+      tasks.map((task, i) => (i === index ? { ...task, text } : task)),
+    );
+    setEditingIndex(null);
+  }
 
   return (
     <>
@@ -84,18 +103,38 @@ useEffect(() => {
                 marginBottom: "10px",
               }}
             >
-              <span
-  onClick={() => toggleTask(index)}
-  style={{
-    cursor: "pointer",
-  }}
->
-  {task.completed ? "✅" : "⬜"} {task.text}
-</span>
+              {editingIndex === index ? (
+                <input
+                  value={editingText}
+                  onChange={(e) => setEditingText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveTask(index);
+                  }}
+                  autoFocus
+                  aria-label="タスクを編集"
+                />
+              ) : (
+                <span
+                  onClick={() => toggleTask(index)}
+                  style={{ cursor: "pointer" }}
+                >
+                  {task.completed ? "✅" : "⬜"} {task.text}
+                </span>
+              )}
 
-              <button onClick={() => deleteTask(index)}>
-                🗑️
-              </button>
+              <div style={{ display: "flex", gap: "10px" }}>
+                {editingIndex === index ? (
+                  <button onClick={() => saveTask(index)}>保存</button>
+                ) : (
+                  <button onClick={() => startEditing(index)} aria-label="編集">
+                    ✏️
+                  </button>
+                )}
+
+                <button onClick={() => deleteTask(index)} aria-label="削除">
+                  🗑️
+                </button>
+              </div>
             </li>
           ))}
         </ul>
