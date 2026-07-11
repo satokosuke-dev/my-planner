@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 type Task = {
   text: string;
   completed: boolean;
+  dueDate?: string;
 };
 
 function Dashboard() {
@@ -21,6 +22,7 @@ function Dashboard() {
   });
 
   const [input, setInput] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
 
@@ -36,10 +38,12 @@ function Dashboard() {
       {
         text: input,
         completed: false,
+        dueDate: dueDate || undefined,
       },
     ]);
 
     setInput("");
+    setDueDate("");
   }
 
   function deleteTask(index: number) {
@@ -90,6 +94,13 @@ function Dashboard() {
             placeholder="タスクを入力"
           />
 
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            aria-label="期限日"
+          />
+
           <button onClick={addTask}>追加</button>
         </div>
 
@@ -103,24 +114,30 @@ function Dashboard() {
                 marginBottom: "10px",
               }}
             >
-              {editingIndex === index ? (
-                <input
-                  value={editingText}
-                  onChange={(e) => setEditingText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") saveTask(index);
-                  }}
-                  autoFocus
-                  aria-label="タスクを編集"
-                />
-              ) : (
-                <span
-                  onClick={() => toggleTask(index)}
-                  style={{ cursor: "pointer" }}
-                >
-                  {task.completed ? "✅" : "⬜"} {task.text}
-                </span>
-              )}
+              <div>
+                {editingIndex === index ? (
+                  <input
+                    value={editingText}
+                    onChange={(e) => setEditingText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveTask(index);
+                    }}
+                    autoFocus
+                    aria-label="タスクを編集"
+                  />
+                ) : (
+                  <span
+                    onClick={() => toggleTask(index)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    {task.completed ? "✅" : "⬜"} {task.text}
+                  </span>
+                )}
+
+                <div style={{ fontSize: "14px", marginTop: "4px" }}>
+                  {task.dueDate ? task.dueDate : "No due date"}
+                </div>
+              </div>
 
               <div style={{ display: "flex", gap: "10px" }}>
                 {editingIndex === index ? (
