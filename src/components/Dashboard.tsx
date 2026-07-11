@@ -233,12 +233,48 @@ function getTodayStudyDuration(taskId: string, sessions: StudySession[]) {
   }, 0);
 }
 
+function getStudyDurationInRange(
+  sessions: StudySession[],
+  rangeStart: Date,
+  rangeEnd: Date,
+) {
+  return sessions.reduce((total, session) => {
+    if (!session.endTime) return total;
+
+    const sessionStart = new Date(session.startTime).getTime();
+    const sessionEnd = new Date(session.endTime).getTime();
+    const overlapStart = Math.max(sessionStart, rangeStart.getTime());
+    const overlapEnd = Math.min(sessionEnd, rangeEnd.getTime());
+
+    return total + Math.max(0, overlapEnd - overlapStart);
+  }, 0);
+}
+
 function getLocalDateString(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
+}
+
+function getRecommendationRank(task: Task, today: string) {
+  if (task.dueDate && task.dueDate < today) return 0;
+  if (task.dueDate === today) return 1;
+  if (task.priority === "High") return 2;
+  return 3;
+}
+
+function getRecommendationReason(
+  task: Task,
+  today: string,
+  todayStudyTime: number,
+) {
+  if (task.dueDate && task.dueDate < today) return "Overdue";
+  if (task.dueDate === today) return "Due today";
+  if (task.priority === "High") return "High priority";
+  if (todayStudyTime === 0) return "No study recorded today";
+  return "Least studied today";
 }
 
 function TodayTaskSection({
@@ -435,10 +471,102 @@ function Dashboard({ projects, selectedProjectId }: DashboardProps) {
   const dueTomorrowTasks = filteredTasks.filter(
     (task) => task.dueDate === tomorrowDate,
   );
+  const todayStudyTimesByTask = new Map(
+    tasks.map((task) => [
+      task.id,
+      getTodayStudyDuration(task.id, studySessions),
+    ]),
+  );
+  const recommendedTasks = tasks
+    .filter((task) => !task.completed)
+    .sort((firstTask, secondTask) => {
+      const rankDifference =
+        getRecommendationRank(firstTask, today) -
+        getRecommendationRank(secondTask, today);
+      if (rankDifference !== 0) return rankDifference;
+
+      const studyDifference =
+        (todayStudyTimesByTask.get(firstTask.id) ?? 0) -
+        (todayStudyTimesByTask.get(secondTask.id) ?? 0);
+      if (studyDifference !== 0) return studyDifference;
+
+      return (firstTask.dueDate ?? "9999-12-31").localeCompare(
+        secondTask.dueDate ?? "9999-12-31",
+      );
+    })
+    .slice(0, 3);
+  const now = new Date();
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfWeek.getDate() - ((startOfWeek.getDay() + 6) % 7));
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const todayStudyTime = getStudyDurationInRange(
+    studySessions,
+    startOfToday,
+    now,
+  );
+  const weekStudyTime = getStudyDurationInRange(
+    studySessions,
+    startOfWeek,
+    now,
+  );
+  const monthStudyTime = getStudyDurationInRange(
+    studySessions,
+    startOfMonth,
+    now,
+  );
+  const averageDailyStudyTime = monthStudyTime / now.getDate();
+  const projectStudyTimes = projects.map((project) => {
+    const projectTaskIds = new Set(
+      tasks
+        .filter((task) => task.projectId === project.id)
+        .map((task) => task.id),
+    );
+
+    return {
+      project,
+      duration: studySessions.reduce(
+        (total, session) =>
+          projectTaskIds.has(session.taskId)
+            ? total + getSessionDuration(session)
+            : total,
+        0,
+      ),
+    };
+  });
 
   return (
     <>
       <h1>Dashboard</h1>
+
+      <section className="card" aria-label="学習のおすすめ" style={{ marginTop: 0, marginBottom: "20px" }}>
+        <h2>Study Recommendation</h2>
+        {recommendedTasks.length === 0 ? (
+          <p style={{ marginTop: "10px" }}>No tasks to recommend.</p>
+        ) : (
+          <ul style={{ marginTop: "12px" }}>
+            {recommendedTasks.map((task) => {
+              const projectName =
+                projects.find((project) => project.id === task.projectId)?.name ??
+                "Inbox";
+              const todayStudyTime = todayStudyTimesByTask.get(task.id) ?? 0;
+
+              return (
+                <li key={task.id} style={{ marginTop: "10px" }}>
+                  <strong>{task.title}</strong>
+                  <p style={{ marginTop: "3px" }}>
+                    📁 {projectName} · {priorityIndicators[task.priority]} {task.priority}
+                  </p>
+                  <p style={{ marginTop: "3px" }}>
+                    {getRecommendationReason(task, today, todayStudyTime)}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       <section
         aria-label="今日の予定"
@@ -486,6 +614,50 @@ function Dashboard({ projects, selectedProjectId }: DashboardProps) {
           <p>🟢 Low</p>
           <h2>{lowPriorityTasks}</h2>
         </div>
+      </section>
+
+      <h2 style={{ margin: "28px 0 12px" }}>Study Analytics</h2>
+      <section
+        aria-label="学習分析"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: "15px",
+        }}
+      >
+        <div className="card" style={{ marginTop: 0, padding: "20px" }}>
+          <p>Today's study time</p>
+          <h2>{formatDuration(todayStudyTime)}</h2>
+        </div>
+        <div className="card" style={{ marginTop: 0, padding: "20px" }}>
+          <p>This week's study time</p>
+          <h2>{formatDuration(weekStudyTime)}</h2>
+        </div>
+        <div className="card" style={{ marginTop: 0, padding: "20px" }}>
+          <p>This month's study time</p>
+          <h2>{formatDuration(monthStudyTime)}</h2>
+        </div>
+        <div className="card" style={{ marginTop: 0, padding: "20px" }}>
+          <p>Average daily study time</p>
+          <h2>{formatDuration(averageDailyStudyTime)}</h2>
+        </div>
+      </section>
+
+      <h2 style={{ margin: "28px 0 12px" }}>Study Time by Project</h2>
+      <section
+        aria-label="プロジェクト別学習時間"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: "15px",
+        }}
+      >
+        {projectStudyTimes.map(({ project, duration }) => (
+          <div key={project.id} className="card" style={{ marginTop: 0, padding: "20px" }}>
+            <p>📁 {project.name}</p>
+            <h2>{formatDuration(duration)}</h2>
+          </div>
+        ))}
       </section>
 
       <div className="card">
